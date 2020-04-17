@@ -1,16 +1,25 @@
 ---
 title: "ISE Analysis"
-output: html_notebook
+author: "J. Beem-Miller"
+date: "17 April 2020"
+output:
+  html_notebook: default
+  pdf_document:
+    latex_engine: xelatex
 ---
 
+# Introduction
+This notebook contains code for reading radiocarbon data from the Ice Storm Experiment (ISE). The ISE project was initiated by Prof. Tim Fahey at Cornell University at Arnot Forest, a northern hardwood research forest maintained by Cornell University near the main campus in upstate New York. Geographic coordinates for the site are: 42.26, -76.627 (obtained from google maps; these are not coordinates for the plots themselves). 
+
 # Background
-This notebook contains code for reading radiocarbon data from the Ice Storm Experiment (ISE). The ISE project was initiated by Prof. Tim Fahey at Cornell University at Arnot Forest, a northern hardwood research forest maintained by Cornell University in near the main campus in upstate New York. Geographic coordinates for the site are: 42.26, -76.627 (obtained from google maps; these are not for the plots themselves). The following notes are drawn from information supplied by T. Fahey in the following file: 
-* ise-fahey/data/external/ise_fahey_plot-IDs_2018-12-29/README.yaml
+*The following notes are drawn from information supplied by T. Fahey in the file:* 
+"ise-fahey/data/external/ise_fahey_plot-IDs_2018-12-29/README.yaml"
 
 Fahey and collaborators simulated the effect of an ice storm on a series of plots by spraying the canopy of mature forest plots with water during mid-winter of 2016. The treatments successfully damaged the canopies of the trees. The design included two replicate plots for each of four treatments: low, mid, high and mid 2x designating different levels of ice. “2x” plots were treated in two successive years, 2016 and 2017. 
 
-Data analyzed in this notebook come from fine root samples sampled from ingrowth cores;  “org” are from forest floor and “min” from mineral soil. The idea is that canopy damage and subsequent recovery resulted in reduced C supply and increased C demand, so that trees would need to draw on older C reserves to build fine roots following the treatment. Roots analyzed here were sampled in the second year of the experiment (2017). Three lab replicates were analyzed for each plot, originating from nine field replicate ingrowth cores.
+The hypothesis for the experiment is that canopy damage and subsequent recovery would result in reduced C supply and increased C demand, so that trees would need to draw on older C reserves to build fine roots following the treatment. 
 
+Data analyzed in this notebook come from fine roots sampled from ingrowth cores;  the codes “O” and “M” are used for organic samples from the forest floor and samples from mineral soil, respectively. Roots analyzed were sampled in the second year of the experiment (2017). Nine ingrowth cores were collected per plot, which were pooled in the lab and then split into three lab replicates for analysis. Only data from the "high", "mid2x", and "control" treatments were analyzed.
 ```{r setup, include = FALSE}
 library(ggplot2)
 library(dplyr)
@@ -28,7 +37,6 @@ ise$d14C <- ifelse(is.na(ise$d14_UCI), ise$d14_JEN, ise$d14_UCI)
 # factorize Plot
 ise$plot_f <- factor(ise$Plot)
 ```
-
 # Results
 Plotting the raw data by treatment ("Ctl" = control; "high" = high, treated in 2016 only; "mid2x" = mid level treatment applied in both 2016 and 2017) shows a potential treatment response in the mineral horizon samples (horizon = "M"), but no clear effect in the organic horizon samples. Overall, variability is high (Fig. 1, below).
 ```{r plot-14c, echo = FALSE}
@@ -74,7 +82,7 @@ ggplot(ise.avg, aes(Treat, d14C.avg, fill=Horizon)) +
         plot.title = element_text(face = "bold"))
 ```
 
-To assess the effect of individual plots, first we will create a variable representing the difference in &#916;^14^C between treatment and control samples, aggregated by plot.
+To assess the effect of individual plots, first we will create a variable representing the difference in $\Delta$^14^C between treatment and control samples, aggregated by plot.
 
 ```{r aggregate by plot, echo = FALSE, include = FALSE}
 # calculate mean control d14C
@@ -104,7 +112,6 @@ ise.plot$Treat <- ise[match(ise.plot$plot_f, ise$plot_f), "Treat"]
 ```
 
 Plotting the plot-level differences from the mean of the controls, by horizon, makes the differences appear more significant (Fig. 3a and 3b). However, with only three replicates per plot, perhaps these differences are not truly significant. 
-
 ```{r plot-aggregated plots, echo = FALSE}
 # plot min
 ise.plot %>% filter(Horizon == "M") %>%
@@ -143,26 +150,43 @@ ise.plot %>% filter(Horizon == "O") %>%
         plot.title = element_text(face = "bold"))
 ```
 
-Statistically, the treatment differences are not signficant when analyzed in a linear regression model with horizon considered as a 
+Statistically, treatment differences are not signficant at alpha = 0.05 when analyzed in a linear regression model: neither for the mineral ("M") or organic ("O") horizon samples.
+```{r OLS, echo = FALSE}
+# Linear regression of d14C by treatment, by horizon
+summary(lm(d14C ~ Treat, ise[ise$Horizon == "M", ])) # marginal signficance of "high" treatment
+summary(lm(d14C ~ Treat, ise[ise$Horizon == "O", ])) # ns
+```
 
-```{r}
-# Linear regression, full model
-summary(lm(d14C ~ Treat + Horizon, ise))
-
+Contrasts are also not significant:
+```{r TukeyHSD, echo = FALSE}
 # Contrasts for mineral samples:
 TukeyHSD(aov(d14C ~ Treat, ise[ise$Horizon == "M",]))
 
 # Contrasts for organic samples:
 TukeyHSD(aov(d14C ~ Treat, ise[ise$Horizon == "O",]))
+```
 
-# Mixed model, considering effect of plot, run for difs:
-ise.mm.m <- lmer(d14C ~ Treat + (1 | plot_f), data = ise[ise$Horizon == "M", ], REML = FALSE)
+A mixed model approach with plot considered as a random factor shows the same results: while there is no signficant treatment effect for organic horizon samples, treatment effects are marginally signficant (Pr(>Chisq)) for mineral samples, which we know is heavily influenced by the data from rep 1 of the "high" damage treatment (sample ID = high_M_1).
+```{r linear mixed model, echo = TRUE}
+## Mixed model, considering effect of plot
+# Min samples
+ise.mm.m <- lmer(d14C ~ Treat + (1 | plot_f), REML = FALSE, data = ise[ise$Horizon == "M", ])
 summary(ise.mm.m)
+# compare unrestricted to restricted fit, i.e. w/o effect of Treat
+ise.mm.m.0 <- lmer(d14C ~ (1 | plot_f), REML = F, ise[ise$Horizon == "M", ])
+anova(ise.mm.m.0, ise.mm.m)
+
+# Org samples:
 ise.mm.o <- lmer(d14C ~ Treat + (1 | plot_f), data = ise[ise$Horizon == "O", ], REML = FALSE)
 summary(ise.mm.o)
+# compare unrestricted to restricted fit, i.e. w/o effect of Treat
+ise.mm.o.0 <- lmer(d14C ~ (1 | plot_f), REML = F, ise[ise$Horizon == "O", ])
+anova(ise.mm.o.0, ise.mm.o)
 
-# Wald test
+# Wald test for significance of Treatment in mixed models
 Anova(ise.mm.m) # marginal signficance
 Anova(ise.mm.o) # ns
 ```
 
+# Conclusion
+Overall, there is no evidence for treatment effects in the organic horizon samples, but some evidence of enrichment in mineral soil samples in response to treatment---especially the "high" damage treatment. The observed effect is in line with the hypothesis, i.e. mobilization of older (more enriched) carbon reserves in response to damage. 
