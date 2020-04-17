@@ -1,0 +1,168 @@
+---
+title: "ISE Analysis"
+output: html_notebook
+---
+
+# Background
+This notebook contains code for reading radiocarbon data from the Ice Storm Experiment (ISE). The ISE project was initiated by Prof. Tim Fahey at Cornell University at Arnot Forest, a northern hardwood research forest maintained by Cornell University in near the main campus in upstate New York. Geographic coordinates for the site are: 42.26, -76.627 (obtained from google maps; these are not for the plots themselves). The following notes are drawn from information supplied by T. Fahey in the following file: 
+* ise-fahey/data/external/ise_fahey_plot-IDs_2018-12-29/README.yaml
+
+Fahey and collaborators simulated the effect of an ice storm on a series of plots by spraying the canopy of mature forest plots with water during mid-winter of 2016. The treatments successfully damaged the canopies of the trees. The design included two replicate plots for each of four treatments: low, mid, high and mid 2x designating different levels of ice. “2x” plots were treated in two successive years, 2016 and 2017. 
+
+Data analyzed in this notebook come from fine root samples sampled from ingrowth cores;  “org” are from forest floor and “min” from mineral soil. The idea is that canopy damage and subsequent recovery resulted in reduced C supply and increased C demand, so that trees would need to draw on older C reserves to build fine roots following the treatment. Roots analyzed here were sampled in the second year of the experiment (2017). Three lab replicates were analyzed for each plot, originating from nine field replicate ingrowth cores.
+
+```{r setup, include = FALSE}
+library(ggplot2)
+library(dplyr)
+library(lme4)
+library(car)
+```
+
+```{r read-data, echo = FALSE}
+# read data (tab 'R_ISE_dd-mm-yyyy' from "Fahey_ISE_FineRoots_15-05-2019.xlsx")
+ise <- read.csv("../data/derived/2020-04-17/ise_14c-root_2020-04-17.csv")
+# create new IDs from treat, horizon, rep
+ise$ID <- paste(ise$Treat, ise$Horizon, ise$Rep, sep = "_")
+# combine UCI and Jena 14c data
+ise$d14C <- ifelse(is.na(ise$d14_UCI), ise$d14_JEN, ise$d14_UCI)
+# factorize Plot
+ise$plot_f <- factor(ise$Plot)
+```
+
+# Results
+Plotting the raw data by treatment ("Ctl" = control; "high" = high, treated in 2016 only; "mid2x" = mid level treatment applied in both 2016 and 2017) shows a potential treatment response in the mineral horizon samples (horizon = "M"), but no clear effect in the organic horizon samples. Overall, variability is high (Fig. 1, below).
+```{r plot-14c, echo = FALSE}
+ggplot(ise, aes(Treat, d14C, color = Horizon, shape = plot_f)) +
+  geom_point(size = 2) +
+  facet_grid(rows = vars(Horizon)) +
+  ggtitle(expression('Fig 1. Fine root' ~ Delta*''^14*'C (\u2030)')) +
+  theme_bw() +
+  theme(panel.grid = element_blank(),
+        plot.title = element_text(face = "bold"))
+```
+
+Figures 2a and 2b show data aggregated by treatment (below). However, the different response in the different plots suggests that combining data from different plots may obscure significant plot-specific trends, e.g. mineral horizon samples from plot 1 vs. plot 8 for the "mid2x" treatment, and weight outliers too heavily (e.g.)
+```{r aggregate data, echo = FALSE}
+ise.avg <- data.frame(Treat = rep(sort(unique(ise$Treat)),2),
+                      Horizon = rep(unique(ise$Horizon),each=3))
+ise.avg$d14C.avg <- c(unlist(tapply(ise[ise$Horizon=="M","d14C"], ise[ise$Horizon=="M","Treat"], mean)),
+                      unlist(tapply(ise[ise$Horizon=="O","d14C"], ise[ise$Horizon=="O","Treat"], mean)))
+ise.avg$d14C.sd <- c(unlist(tapply(ise[ise$Horizon=="M","d14C"], ise[ise$Horizon=="M","Treat"], sd)),
+                     unlist(tapply(ise[ise$Horizon=="O","d14C"], ise[ise$Horizon=="O","Treat"], sd)))
+ise.avg$d14C.se <- ise.avg$d14C.sd/sqrt(6)
+ise.avg$u <- ise.avg$d14C.avg + 1.96*ise.avg$d14C.se
+ise.avg$l <- ise.avg$d14C.avg - 1.96*ise.avg$d14C.se
+```
+```{r plot-14c w/ error bars, echo = FALSE}
+# plot w/ 95% CI
+ggplot(ise.avg, aes(Treat, d14C.avg, fill=Horizon)) +
+  geom_col(position = "dodge", width=.9) +
+  geom_errorbar(aes(ymin=l, ymax=u, group=Horizon), position=position_dodge(.9), width=.5) +
+  facet_grid(rows = vars(Horizon)) +
+  ggtitle(expression('Fig 2a. Fine root' ~ Delta*''^14*'C (\u2030, \u00B1 SE)')) +
+  theme_bw() +
+  theme(panel.grid = element_blank(),
+        plot.title = element_text(face = "bold"))
+# plot w/ se
+ggplot(ise.avg, aes(Treat, d14C.avg, fill=Horizon)) +
+  geom_col(position = "dodge", width=.9) +
+  geom_errorbar(aes(ymin=d14C.avg-d14C.se, ymax=d14C.avg+d14C.se, group=Horizon), position=position_dodge(.9), width=.5) +
+  facet_grid(rows = vars(Horizon)) +
+  ggtitle(expression('Fig 2b. Fine root' ~ Delta*''^14*'C (\u2030, \u00B1 95% CI)')) +
+  theme_bw() +
+  theme(panel.grid = element_blank(),
+        plot.title = element_text(face = "bold"))
+```
+
+To assess the effect of individual plots, first we will create a variable representing the difference in &#916;^14^C between treatment and control samples, aggregated by plot.
+
+```{r aggregate by plot, echo = FALSE, include = FALSE}
+# calculate mean control d14C
+ise.ctl <- filter(ise, Treat == "Ctl") %>%
+  group_by(Horizon) %>%
+  summarise(mean = mean(d14C, na.rm = TRUE),
+            sd = sd(d14C, na.rm = TRUE),
+            count = n()) %>%
+  mutate(se = sd / sqrt(count),
+         ci95 = 1.96 * sd / sqrt(count))
+CI95.ctl.m <- unlist(ise.ctl[ise.ctl$Horizon == "M", "ci95"])
+CI95.ctl.o <- unlist(ise.ctl[ise.ctl$Horizon == "O", "ci95"])
+
+# calculate dif in 14C from control for M, O samples
+ise$dif <- ifelse(ise$Horizon == "M", 
+                  ise$d14C-CI95.ctl.m, 
+                  ise$d14C-CI95.ctl.o)
+ise.plot <- filter(ise, Treat != "Ctl") %>%
+  group_by(Horizon, plot_f) %>%
+  summarise(mean = mean(dif),
+            sd = sd(dif),
+            count = n()) %>%
+  mutate(se = sd / sqrt(count),
+         l = mean - 1.96 * se,
+         u = mean + 1.96 * se)
+ise.plot$Treat <- ise[match(ise.plot$plot_f, ise$plot_f), "Treat"]
+```
+
+Plotting the plot-level differences from the mean of the controls, by horizon, makes the differences appear more significant (Fig. 3a and 3b). However, with only three replicates per plot, perhaps these differences are not truly significant. 
+
+```{r plot-aggregated plots, echo = FALSE}
+# plot min
+ise.plot %>% filter(Horizon == "M") %>%
+  ggplot(., aes(plot_f, mean)) +
+  geom_hline(yintercept = 0) +
+  geom_hline(yintercept = 1.79, linetype = "dashed") +
+  geom_hline(yintercept = -1.79, linetype = "dashed") +
+  geom_point(size = 3, color = "#F8766D") +
+  geom_errorbar(aes(ymin = l, 
+                    ymax = u, 
+                    group = Horizon),
+                width=.2,
+                color = "#F8766D") +
+  facet_grid(cols = vars(Treat)) +
+  ggtitle(expression('Fig 3a. Mineral soil fine root' ~ Delta*''^14*'C by plot (\u2030, \u00B1 95% CI)')) +
+  theme_bw() +
+  theme(panel.grid = element_blank(),
+        plot.title = element_text(face = "bold"))
+
+# plot org
+ise.plot %>% filter(Horizon == "O") %>%
+  ggplot(., aes(plot_f, mean, drop = TRUE)) +
+  geom_hline(yintercept = 0) +
+  geom_hline(yintercept = 3.91, linetype = "dashed") +
+  geom_hline(yintercept = -3.91, linetype = "dashed") +
+  geom_point(size = 3, color = "#00BFC4") +
+  geom_errorbar(aes(ymin = l, 
+                    ymax = u, 
+                    group = Horizon),
+                width=.2,
+                color = "#00BFC4") +
+  facet_grid(cols = vars(Treat)) +
+  ggtitle(expression('Fig 3b. Organic soil fine root' ~ Delta*''^14*'C by plot (\u2030, \u00B1 95% CI)')) +
+  theme_bw() +
+  theme(panel.grid = element_blank(),
+        plot.title = element_text(face = "bold"))
+```
+
+Statistically, the treatment differences are not signficant when analyzed in a linear regression model with horizon considered as a 
+
+```{r}
+# Linear regression, full model
+summary(lm(d14C ~ Treat + Horizon, ise))
+
+# Contrasts for mineral samples:
+TukeyHSD(aov(d14C ~ Treat, ise[ise$Horizon == "M",]))
+
+# Contrasts for organic samples:
+TukeyHSD(aov(d14C ~ Treat, ise[ise$Horizon == "O",]))
+
+# Mixed model, considering effect of plot, run for difs:
+ise.mm.m <- lmer(d14C ~ Treat + (1 | plot_f), data = ise[ise$Horizon == "M", ], REML = FALSE)
+summary(ise.mm.m)
+ise.mm.o <- lmer(d14C ~ Treat + (1 | plot_f), data = ise[ise$Horizon == "O", ], REML = FALSE)
+summary(ise.mm.o)
+
+# Wald test
+Anova(ise.mm.m) # marginal signficance
+Anova(ise.mm.o) # ns
+```
+
