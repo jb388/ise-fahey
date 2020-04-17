@@ -1,0 +1,16 @@
+Files:
+  - "14C Eingabefile_ISE fine roots.xlsx"
+  - "Beem-Miller_10.xlsx"
+Source:
+  - J. Beem-Miller <jbeem@bgc-jena.mpg.de>
+  - A. Steinhof <steinhof@bgc-jena.mpg.de>
+Curator: J. Beem-Miller <jbeem@bgc-jena.mpg.de>
+Date received:
+  - 03-Jul-2019
+  - 29-Jul-2019
+Contents:
+  - root samples from T. Fahey's Ice Storm Experiment (ISE): submission form for Jena AMS and results
+Notes:
+  - Submitted remainder of root samples as data from first set of samples was ambiguous, and the sample queue for the AMS was very low
+  - See README in ./external/ for background information on samples
+References:
